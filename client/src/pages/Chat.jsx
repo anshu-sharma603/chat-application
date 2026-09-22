@@ -16,7 +16,7 @@ export default function Chat() {
   const [typingMap, setTypingMap] = useState({});
   const socketRef = useRef(null);
   const activeUserRef = useRef(null);
-  const usersRef = useRef([]); // NEW: always holds latest users list
+  const usersRef = useRef([]); // always holds latest users list
 
   // ---- Call state ----
   const [callStatus, setCallStatus] = useState(null); // null | "calling" | "incoming" | "ongoing"
@@ -30,7 +30,7 @@ export default function Chat() {
     activeUserRef.current = activeUser;
   }, [activeUser]);
 
-  // NEW: keep usersRef in sync without needing "users" in the socket effect's deps
+  // keep usersRef in sync without needing "users" in the socket effect's deps
   useEffect(() => {
     usersRef.current = users;
   }, [users]);
@@ -65,7 +65,6 @@ export default function Chat() {
 
     // ---- Call signaling ----
     socket.on("call:incoming", ({ fromUserId, offer, callType: incomingType }) => {
-      // NEW: use usersRef instead of closure-captured "users"
       const caller = usersRef.current.find((u) => u._id === fromUserId) || { _id: fromUserId, name: "Someone" };
       pendingOfferRef.current = offer;
       setCallPeer(caller);
@@ -98,19 +97,31 @@ export default function Chat() {
       disconnectSocket();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]); // FIX: removed "users" from deps so socket doesn't reconnect on presence changes
+  }, [token]);
 
-  // Load user list
+  // Load user list — FIX: attach token directly to this request instead of
+  // relying on axios.defaults being set by AuthContext's effect first
   useEffect(() => {
-    axios.get(`${API_URL}/users`).then((res) => setUsers(res.data));
-  }, []);
+    if (!token) return;
+    axios
+      .get(`${API_URL}/users`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      .then((res) => setUsers(res.data))
+      .catch((err) => console.error("Failed to load users:", err));
+  }, [token]);
 
-  const selectUser = useCallback(async (u) => {
-    setActiveUser(u);
-    const res = await axios.get(`${API_URL}/users/${u._id}/messages`);
-    setMessages(res.data);
-    socketRef.current?.emit("message:read", { senderId: u._id });
-  }, []);
+  const selectUser = useCallback(
+    async (u) => {
+      setActiveUser(u);
+      const res = await axios.get(`${API_URL}/users/${u._id}/messages`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setMessages(res.data);
+      socketRef.current?.emit("message:read", { senderId: u._id });
+    },
+    [token]
+  );
 
   const sendMessage = () => {
     if (!text.trim() || !activeUser) return;
