@@ -4,6 +4,8 @@ import { useAuth, API_URL } from "../context/AuthContext.jsx";
 import { connectSocket, disconnectSocket } from "../socket.js";
 import Sidebar from "../components/Sidebar.jsx";
 import ChatWindow from "../components/ChatWindow.jsx";
+import CallModal from "../components/CallModal.jsx";
+import useWebRTC from "../hooks/useWebRTC.js";
 
 export default function Chat() {
   const { user, token, logout } = useAuth();
@@ -14,10 +16,24 @@ export default function Chat() {
   const [typingMap, setTypingMap] = useState({});
   const socketRef = useRef(null);
   const activeUserRef = useRef(null);
+  const usersRef = useRef([]); // NEW: always holds latest users list
+
+  // ---- Call state ----
+  const [callStatus, setCallStatus] = useState(null); // null | "calling" | "incoming" | "ongoing"
+  const [callType, setCallType] = useState("video");
+  const [callPeer, setCallPeer] = useState(null); // { id, name }
+  const pendingOfferRef = useRef(null);
+
+  const webrtc = useWebRTC(socketRef.current);
 
   useEffect(() => {
     activeUserRef.current = activeUser;
   }, [activeUser]);
+
+  // NEW: keep usersRef in sync without needing "users" in the socket effect's deps
+  useEffect(() => {
+    usersRef.current = users;
+  }, [users]);
 
   // Connect socket once
   useEffect(() => {
@@ -47,11 +63,42 @@ export default function Chat() {
       setTypingMap((prev) => ({ ...prev, [senderId]: isTyping }));
     });
 
+    // ---- Call signaling ----
+    socket.on("call:incoming", ({ fromUserId, offer, callType: incomingType }) => {
+      // NEW: use usersRef instead of closure-captured "users"
+      const caller = usersRef.current.find((u) => u._id === fromUserId) || { _id: fromUserId, name: "Someone" };
+      pendingOfferRef.current = offer;
+      setCallPeer(caller);
+      setCallType(incomingType);
+      setCallStatus("incoming");
+    });
+
+    socket.on("call:answered", async ({ answer }) => {
+      await webrtc.handleAnswer(answer);
+      setCallStatus("ongoing");
+    });
+
+    socket.on("call:ice-candidate", async ({ candidate }) => {
+      await webrtc.handleIceCandidate(candidate);
+    });
+
+    socket.on("call:rejected", () => {
+      webrtc.endCall();
+      setCallStatus(null);
+      setCallPeer(null);
+    });
+
+    socket.on("call:ended", () => {
+      webrtc.endCall();
+      setCallStatus(null);
+      setCallPeer(null);
+    });
+
     return () => {
       disconnectSocket();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token]); // FIX: removed "users" from deps so socket doesn't reconnect on presence changes
 
   // Load user list
   useEffect(() => {
@@ -82,6 +129,38 @@ export default function Chat() {
     }
   };
 
+  // ---- Call actions ----
+  const handleStartCall = async (type) => {
+    if (!activeUser) return;
+    setCallPeer(activeUser);
+    setCallType(type);
+    setCallStatus("calling");
+    await webrtc.startCall(activeUser._id, type);
+  };
+
+  const handleAcceptCall = async () => {
+    if (!callPeer || !pendingOfferRef.current) return;
+    await webrtc.answerCall(callPeer._id, pendingOfferRef.current, callType);
+    setCallStatus("ongoing");
+  };
+
+  const handleRejectCall = () => {
+    if (callPeer) {
+      socketRef.current?.emit("call:reject", { toUserId: callPeer._id });
+    }
+    setCallStatus(null);
+    setCallPeer(null);
+  };
+
+  const handleEndCall = () => {
+    if (callPeer) {
+      socketRef.current?.emit("call:end", { toUserId: callPeer._id });
+    }
+    webrtc.endCall();
+    setCallStatus(null);
+    setCallPeer(null);
+  };
+
   return (
     <div className="chat-page">
       <Sidebar
@@ -102,6 +181,19 @@ export default function Chat() {
         setText={handleTextChange}
         onSend={sendMessage}
         isTyping={activeUser ? !!typingMap[activeUser._id] : false}
+        onStartCall={handleStartCall}
+      />
+      <CallModal
+        callStatus={callStatus}
+        callerName={callPeer?.name}
+        callType={callType}
+        localStream={webrtc.localStream}
+        remoteStream={webrtc.remoteStream}
+        onAccept={handleAcceptCall}
+        onReject={handleRejectCall}
+        onEnd={handleEndCall}
+        onToggleMute={webrtc.toggleMute}
+        onToggleCamera={webrtc.toggleCamera}
       />
     </div>
   );

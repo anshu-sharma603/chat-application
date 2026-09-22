@@ -1,4 +1,7 @@
 require("dotenv").config();
+const dns = require("dns");
+dns.setServers(["8.8.8.8", "8.8.4.4"]); // Force Google DNS to fix SRV lookup issue
+
 const express = require("express");
 const http = require("http");
 const cors = require("cors");
@@ -74,6 +77,36 @@ io.on("connection", async (socket) => {
       { $set: { status: "read" } }
     );
     io.to(senderId).emit("message:readAck", { readerId: userId });
+  });
+
+  // ---- WebRTC signaling for video/audio calling ----
+  // Caller starts a call: sends a WebRTC offer to the callee
+  socket.on("call:offer", ({ toUserId, offer, callType }) => {
+    io.to(toUserId).emit("call:incoming", {
+      fromUserId: userId,
+      offer,
+      callType, // "video" or "audio"
+    });
+  });
+
+  // Callee accepts: sends back a WebRTC answer to the caller
+  socket.on("call:answer", ({ toUserId, answer }) => {
+    io.to(toUserId).emit("call:answered", { fromUserId: userId, answer });
+  });
+
+  // Both sides exchange ICE candidates as they're discovered
+  socket.on("call:ice-candidate", ({ toUserId, candidate }) => {
+    io.to(toUserId).emit("call:ice-candidate", { fromUserId: userId, candidate });
+  });
+
+  // Callee declines the call
+  socket.on("call:reject", ({ toUserId }) => {
+    io.to(toUserId).emit("call:rejected", { fromUserId: userId });
+  });
+
+  // Either side ends an ongoing/ringing call
+  socket.on("call:end", ({ toUserId }) => {
+    io.to(toUserId).emit("call:ended", { fromUserId: userId });
   });
 
   socket.on("disconnect", async () => {

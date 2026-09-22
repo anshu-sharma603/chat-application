@@ -8,6 +8,7 @@ export default function ChatWindow({
   setText,
   onSend,
   isTyping,
+  onStartCall,
 }) {
   const bottomRef = useRef(null);
 
@@ -34,11 +35,15 @@ export default function ChatWindow({
     <div className="chat-window">
       <div className="chat-header">
         <div className="avatar">{activeUser.name[0].toUpperCase()}</div>
-        <div>
+        <div className="header-info">
           <div className="user-name">{activeUser.name}</div>
           <div className="user-status">
             {isTyping ? "typing..." : activeUser.isOnline ? "Online" : "Offline"}
           </div>
+        </div>
+        <div className="header-actions">
+          <button className="icon-btn" title="Audio call" onClick={() => onStartCall("audio")}>📞</button>
+          <button className="icon-btn" title="Video call" onClick={() => onStartCall("video")}>🎥</button>
         </div>
       </div>
 
