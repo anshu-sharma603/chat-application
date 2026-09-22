@@ -49,6 +49,8 @@ io.on("connection", async (socket) => {
   await User.findByIdAndUpdate(userId, { isOnline: true });
   io.emit("presence:update", { userId, isOnline: true });
 
+  console.log("User connected:", userId, "| Online users:", Array.from(onlineUsers.keys()));
+
   // Join a personal room so we can target this user easily
   socket.join(userId);
 
@@ -82,15 +84,21 @@ io.on("connection", async (socket) => {
   // ---- WebRTC signaling for video/audio calling ----
   // Caller starts a call: sends a WebRTC offer to the callee
   socket.on("call:offer", ({ toUserId, offer, callType }) => {
+    console.log("call:offer received | from:", userId, "| to:", toUserId);
+    console.log("Is receiver online?", onlineUsers.has(toUserId), "| Online users:", Array.from(onlineUsers.keys()));
+
     io.to(toUserId).emit("call:incoming", {
       fromUserId: userId,
       offer,
       callType, // "video" or "audio"
     });
+
+    console.log("call:incoming emitted to room:", toUserId);
   });
 
   // Callee accepts: sends back a WebRTC answer to the caller
   socket.on("call:answer", ({ toUserId, answer }) => {
+    console.log("call:answer received | from:", userId, "| to:", toUserId);
     io.to(toUserId).emit("call:answered", { fromUserId: userId, answer });
   });
 
@@ -113,6 +121,7 @@ io.on("connection", async (socket) => {
     onlineUsers.delete(userId);
     await User.findByIdAndUpdate(userId, { isOnline: false, lastSeen: new Date() });
     io.emit("presence:update", { userId, isOnline: false });
+    console.log("User disconnected:", userId, "| Online users:", Array.from(onlineUsers.keys()));
   });
 });
 
