@@ -99,8 +99,7 @@ export default function Chat() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  // Load user list — FIX: attach token directly to this request instead of
-  // relying on axios.defaults being set by AuthContext's effect first
+  // Load user list — token attached directly to avoid race condition
   useEffect(() => {
     if (!token) return;
     axios
@@ -146,13 +145,26 @@ export default function Chat() {
     setCallPeer(activeUser);
     setCallType(type);
     setCallStatus("calling");
-    await webrtc.startCall(activeUser._id, type);
+    try {
+      await webrtc.startCall(activeUser._id, type);
+    } catch (err) {
+      console.error("Failed to start call:", err);
+      alert("Camera/Microphone permission denied. Please allow access and try again.");
+      setCallStatus(null);
+      setCallPeer(null);
+    }
   };
 
   const handleAcceptCall = async () => {
     if (!callPeer || !pendingOfferRef.current) return;
-    await webrtc.answerCall(callPeer._id, pendingOfferRef.current, callType);
-    setCallStatus("ongoing");
+    try {
+      await webrtc.answerCall(callPeer._id, pendingOfferRef.current, callType);
+      setCallStatus("ongoing");
+    } catch (err) {
+      console.error("Failed to answer call:", err);
+      alert("Camera/Microphone permission denied. Please allow access and try again.");
+      handleRejectCall();
+    }
   };
 
   const handleRejectCall = () => {
